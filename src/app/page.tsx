@@ -1,112 +1,147 @@
-import Image from "next/image";
+"use client"
+import Switch from "@/views/components/switch";
+import CardComponent from "@/views/components/card";
+import { useEffect, useState } from "react";
+import Loading from "@/views/components/loading";
+import HttpService from "@/services/http.service";
+import useStore from "@/state-management-v2/useStore";
+import Button from "@/views/components/button";
+
+const http = new HttpService()
 
 export default function Home() {
+  const [data, setData] = useState<any[]>([])
+  const [checked, setStatus] = useState<boolean>(true)
+  const [state, updateState] = useStore();
+  const [loading, setLoading] = useState<boolean>(false)
+  const [spiece, setSpiece] = useState<string>('mammal')
+
+  function getPlanetsWithReptileResidents(props: getPlanetsWithReptileResidentsProps) {
+    return new Promise<Planet[]>((resolve, reject) => {
+      const planetsWithReptileResidents: Planet[] = [];
+
+      http.get("/planets")
+        .then((response: any) => {
+          const planets: Planet[] = response.results;
+          const residentPromises: Promise<void>[] = [];
+
+          planets.forEach((planet) => {
+            // Check if the planet has appeared in at least one movie and has residents
+            if (planet.films.length > 0 && planet.residents.length > 0) {
+              planet.residents.forEach((residentUrl) => {
+                const residentPromise = http.get(residentUrl)
+                  .then((residentResponse: any) => {
+                    const resident: Resident = residentResponse;
+                    const speciesPromises: Promise<void>[] = resident.species.map((speciesUrl) => {
+                      return http.get(speciesUrl)
+                        .then((speciesResponse: any) => {
+                          const species: Species = speciesResponse;
+                          // Check if the species classification matches the specified reptile species
+                          if (species.classification === props.specie) {
+                            planetsWithReptileResidents.push(planet);
+                          }
+                        });
+                    });
+                    // Return a promise that resolves when all species promises have resolved
+                    return Promise.all(speciesPromises).then(() => { });
+                  });
+                residentPromises.push(residentPromise);
+              });
+            }
+          });
+
+          return Promise.all(residentPromises);
+        })
+        .then(() => {
+          // Removing duplicate planets
+          const uniquePlanets = Array.from(new Set(planetsWithReptileResidents.map(p => p.name)))
+            .map(name => planetsWithReptileResidents.find(p => p.name === name)!);
+
+          // Fetch films data for each planet
+          const filmPromises = uniquePlanets.map((planet) => {
+            const filmDataPromises = planet.films.map((filmUrl) => {
+              return http.get(filmUrl)
+                .then((filmResponse: any) => filmResponse);
+            });
+
+            // Replace film URLs with film data
+            return Promise.all(filmDataPromises).then((films) => {
+              planet.films = films;
+            });
+          });
+          return Promise.all(filmPromises).then(() => uniquePlanets);
+        })
+        .then((uniquePlanets) => {
+          resolve(uniquePlanets);
+        })
+        .catch((error) => {
+          reject(new Error(`Error fetching planets with reptile residents: ${error.message}`));
+        });
+    });
+  }
+
+  function getData(props: getDataProps) {
+    setData([])
+    setLoading(true);
+    getPlanetsWithReptileResidents({ specie: props.specie })
+      .then((planets: any) => {
+        console.log('planets:', planets);
+        setData(planets);
+        setLoading(false);
+      })
+      .catch(error => {
+        console.error("Error fetching data:", error);
+        setLoading(false);
+      });
+  }
+
+  // Example usage
+  useEffect(() => {
+    getData({ specie: spiece })
+  }, [spiece])
+
+  console.log(data);
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">src/app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:size-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
+    <main className="flex w-full min-h-screen flex-col items-center gap-8 p-4 min[800px]:p-24 max[800px]:p-4">
+      <h2>manual / FETCH DATA / auto</h2>
+      <div className="flex row justify-cenetr items-center gap-4">
+        <Switch checked={checked} setChecked={setStatus} />
+      </div>
+      <div className="flex row justify-cenetr items-center gap-4">
+        <Button bg={spiece === 'mammal'} name="mammal" onClick={() => { setSpiece('mammal') }} />
+        <Button bg={spiece === 'reptile'} name="reptile" onClick={() => { setSpiece('reptile') }} />
+        <Button bg={spiece === 'amphibian'} name="amphibian" onClick={() => { setSpiece('amphibian') }} />
+      </div>
+      <div className="mb-32 grid w-full text-center lg:mb-0 lg:w-full gap-6 lg:max-w-5xl lg:text-left">
+        <div>
+          <div className="flex justify-center items-center">
+            {!checked && <button
+              className="bg-[#2196F3] text-[black] pr-3 pl-3 pt-1 pb-1 rounded-lg"
+              onClick={() => {
+                getData({ specie: spiece })
+                updateState({ count: state.count + 1 })
+              }}
+            >
+              Get Data {state.count}
+            </button>}
+          </div>
         </div>
-      </div>
-
-      <div className="relative z-[-1] flex place-items-center before:absolute before:h-[300px] before:w-full before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-full after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 sm:before:w-[480px] sm:after:w-[240px] before:lg:h-[360px]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
-
-      <div className="mb-32 grid text-center lg:mb-0 lg:w-full lg:max-w-5xl lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Docs{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Learn{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Templates{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Explore starter templates for Next.js.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Deploy{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-balance text-sm opacity-50">
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
+        {data.map((item: any) => {
+          return <CardComponent
+            created={item.created}
+            name={item.name}
+            climate={item.climate}
+            films={item.films}
+            population={item.population}
+          />
+        })}
+        {!loading && data.length === 0 && <div className="flex justify-center"><h2>Not found</h2></div>}
+        {loading &&
+          <div className="flex w-full">
+            <Loading />
+          </div>
+        }
       </div>
     </main>
   );
